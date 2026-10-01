@@ -102,18 +102,54 @@ def get_repository_data(repository):
 
     url = f"https://api.github.com/repos/{repository}"
 
-    response = requests.get(url)
+    try:
+        response = requests.get(url, timeout=10)
 
-    if response.status_code != 200:
-        raise Exception(
-            f"GitHub API request failed: {response.status_code}"
+        if response.status_code == 404:
+            raise ValueError(
+                "Repository not found. Check the owner/name."
+            )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"GitHub API request failed: "
+                f"{response.status_code}"
+            )
+
+        return response.json()
+
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            "GitHub API request timed out."
         )
 
-    return response.json()
-
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(
+            f"Network error while contacting GitHub: {e}"
+        )
 
 def extract_research_data(data):
-    """Extract only the fields required by our application."""
+    """Extract and validate the fields required by our application."""
+
+    required_fields = [
+        "full_name",
+        "description",
+        "stargazers_count",
+        "forks_count",
+        "language",
+        "owner",
+    ]
+
+    for field in required_fields:
+        if field not in data:
+            raise ValueError(
+                f"Expected field '{field}' was not found in API response."
+            )
+
+    if "login" not in data["owner"]:
+        raise ValueError(
+            "Expected owner login was not found in API response."
+        )
 
     return {
         "repository": data["full_name"],
@@ -123,8 +159,7 @@ def extract_research_data(data):
         "language": data["language"],
         "owner": data["owner"]["login"],
     }
-
-
+      
 def create_llm():
     """Create the local Ollama LLM."""
 
@@ -165,29 +200,33 @@ def ask_llm(llm, research_data, user_question):
 
 def main():
 
-    repository = "langchain-ai/langchain"
-
-    print("Fetching repository information...")
-
-    data = get_repository_data(repository)
-
-    research_data = extract_research_data(data)
-
-    llm = create_llm()
-
-    user_question = input(
-        "\nWhat would you like to know about this repository? "
+    repository = input(
+        "Enter GitHub repository (owner/name): "
     )
 
-    answer = ask_llm(
-        llm,
-        research_data,
-        user_question
-    )
+    print("\nFetching repository information...")
 
-    print("\nResearch Answer:")
-    print(answer)
+    try:
+        data = get_repository_data(repository)
 
+        research_data = extract_research_data(data)
 
+        llm = create_llm()
+
+        user_question = input(
+            "\nWhat would you like to know about this repository? "
+        )
+
+        answer = ask_llm(
+            llm,
+            research_data,
+            user_question
+        )
+
+        print("\nResearch Answer:")
+        print(answer)
+
+    except Exception as e:
+        print(f"\nError: {e}")
 if __name__ == "__main__":
     main()
